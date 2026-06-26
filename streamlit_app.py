@@ -22,8 +22,12 @@ def log_message(*args, **kwargs):
 
 
 
+DEFAULT_COLLECT_START_DATE = "20260101"
+DEFAULT_COLLECT_END_DATE = "20260625"
+
+
 @st.cache_data(show_spinner="FUNETF 데이터를 불러오는 중입니다. 첫 실행은 몇 분 걸릴 수 있습니다.")
-def load_etf_holdings(force_refresh=False):
+def load_etf_holdings(collection_start_date, collection_end_date, force_refresh=False):
 
 
     # ------------------------------------------------------------
@@ -46,12 +50,21 @@ def load_etf_holdings(force_refresh=False):
     holding_api_url = base_url + "/api/public/product/view/etfpdf"
 
     ################################################################# 수집할 날짜
-    start_date = "20260101"
-    end_date = "20260625"
-    cache_path = Path(__file__).with_name("funetf_cached_data.pkl")
+    start_date = collection_start_date
+    end_date = collection_end_date
+    cache_path = Path(__file__).with_name(f"funetf_cached_data_{start_date}_{end_date}.pkl")
+    legacy_cache_path = Path(__file__).with_name("funetf_cached_data.pkl")
 
     if cache_path.exists() and not force_refresh:
         return pd.read_pickle(cache_path)
+
+    if (
+        start_date == DEFAULT_COLLECT_START_DATE
+        and end_date == DEFAULT_COLLECT_END_DATE
+        and legacy_cache_path.exists()
+        and not force_refresh
+    ):
+        return pd.read_pickle(legacy_cache_path)
 
 
 
@@ -1171,13 +1184,34 @@ st.title("ETF 구성종목 비중변화 대시보드")
 st.caption("기간별 구성종목 비중변화를 가격효과와 수량효과로 분해하고, 변동이 큰 ETF와 종목을 시각적으로 비교합니다.")
 
 with st.sidebar:
+    st.header("데이터 수집")
+    collection_start_date = st.text_input("수집 시작일", DEFAULT_COLLECT_START_DATE)
+    collection_end_date = st.text_input("수집 종료일", DEFAULT_COLLECT_END_DATE)
     force_refresh = st.checkbox(
         "데이터 새로 수집",
         value=False,
-        help="끄면 funetf_cached_data.pkl 파일 또는 Streamlit 캐시를 먼저 사용합니다.",
+        help="끄면 입력한 수집 기간에 해당하는 캐시 파일 또는 Streamlit 캐시를 먼저 사용합니다.",
     )
 
-etf_info, etf_holdings_F = load_etf_holdings(force_refresh=force_refresh)
+collection_start_date = collection_start_date.strip().replace("-", "")
+collection_end_date = collection_end_date.strip().replace("-", "")
+
+try:
+    pd.to_datetime(collection_start_date, format="%Y%m%d")
+    pd.to_datetime(collection_end_date, format="%Y%m%d")
+except ValueError:
+    st.error("수집 시작일과 종료일은 YYYYMMDD 형식으로 입력하세요. 예: 20260501")
+    st.stop()
+
+if pd.to_datetime(collection_start_date, format="%Y%m%d") > pd.to_datetime(collection_end_date, format="%Y%m%d"):
+    st.error("수집 시작일은 수집 종료일보다 이전이어야 합니다.")
+    st.stop()
+
+etf_info, etf_holdings_F = load_etf_holdings(
+    collection_start_date=collection_start_date,
+    collection_end_date=collection_end_date,
+    force_refresh=force_refresh,
+)
 log_df = prepare_log_df(etf_holdings_F)
 
 if log_df.empty:
